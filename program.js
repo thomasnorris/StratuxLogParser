@@ -45,7 +45,9 @@ function readFile() {
 }
 
 function parseCSV(name, fileInfoID) {
-    var sql = '';
+    var sql;
+    var rows;
+    var columns;
     var readCount = 0;
     var sentCount = 0;
     _fs.createReadStream(name)
@@ -54,25 +56,23 @@ function parseCSV(name, fileInfoID) {
             ++readCount;
             data.file_info_ID = fileInfoID;
             var keys = Object.keys(data);
+
+            // build and send each query
             sql = 'INSERT INTO dbo.DataDumpCSV (';
-
-            // grab all column names
+            rows = '';
+            columns = '';
             keys.forEach((key) => {
-                sql += key
-                if (keys.indexOf(key) !== keys.length - 1)
-                    sql += ', ';
+                rows += key
+                columns += data[key];
+
+                // don't add a comma on the last read key
+                if (keys.indexOf(key) !== keys.length - 1) {
+                    rows += ', ';
+                    columns += ', ';
+                }
             });
 
-            sql += ') VALUES (';
-
-            // grab all values
-            keys.forEach((key) => {
-                sql += data[key];
-                if (keys.indexOf(key) !== keys.length - 1)
-                    sql += ', ';
-            });
-
-            sql += ')';
+            sql += rows + ') VALUES (' + columns + ');';
 
             sendRequest(sql, (res) => {
                 ++sentCount;
