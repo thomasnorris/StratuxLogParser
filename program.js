@@ -32,7 +32,7 @@ function readFile() {
         var regex = /\.[0-9a-z]+$/i;
         var ext = fileName.match(regex)[0].toLowerCase();
 
-        // insert into the file info table and continue
+        // insert into dbo.FileInfo table and send the ID alone
         var sql = 'INSERT INTO dbo.FileInfo (file_name, date_parsed) OUTPUT Inserted.ID VALUES (\'' + fileName + '\', GETDATE())';
         sendRequest(sql, (res) => {
             var fileInfoID = res.recordset[0].ID;
@@ -42,7 +42,6 @@ function readFile() {
                 parseLog(fileName, fileInfoID);
         });
     });
-    //parseCSV('C:/Users/tnorris/Downloads/sensors_20191125_223549.csv', 1);
 }
 
 function parseCSV(name, fileInfoID) {
@@ -74,11 +73,13 @@ function parseCSV(name, fileInfoID) {
 
             sendRequest(sql, (res) => {
                 ++sentCount;
+                // reading will finish before sending, only complete when both are done
                 if (sentCount === readCount)
                     halt('dbo.DataDumpCSV updated with ' + sentCount + ' new records');
             });
         })
         .on('end', (res) => {
+            // done reading the file but not sending requests
             console.log('Read ' + readCount + ' rows.');
         });
 }
