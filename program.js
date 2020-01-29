@@ -55,6 +55,8 @@ function parseCSV(name, fileInfoID) {
             data.file_info_ID = fileInfoID;
             var keys = Object.keys(data);
             sql = 'INSERT INTO dbo.DataDumpCSV (';
+
+            // grab all column names
             keys.forEach((key) => {
                 sql += key
                 if (keys.indexOf(key) !== keys.length - 1)
@@ -63,6 +65,7 @@ function parseCSV(name, fileInfoID) {
 
             sql += ') VALUES (';
 
+            // grab all values
             keys.forEach((key) => {
                 sql += data[key];
                 if (keys.indexOf(key) !== keys.length - 1)
