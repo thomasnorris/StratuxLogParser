@@ -3,10 +3,6 @@ var _sql = require('mssql');
 var _csv = require('csv-parser');
 var _fs = require('fs');
 var _rl = require('readline');
-_rl = _rl.createInterface({
-    input: process.stdin,
-    output: process.stdout
-});
 
 const SQL_CFG = {
     user: 'sa',
@@ -16,25 +12,37 @@ const SQL_CFG = {
     port: 1433
 }
 
+const CSV_TABLE = 'dbo.SensorCSVData';
+const LOG_TABLE = 'dbo.StratuxLogData';
+const FILE_INFO_TABLE = 'dbo.ParsedFileInfo';
+
 _sql.connect(SQL_CFG, (err) => {
     if (err)
         halt(err);
 
-    console.log('\n\nConnection successful.\n\n');
+    console.log('\n\nConnection successful.\n');
     readFile();
 });
 
 function readFile() {
-    _rl.question('File path to read with extension [no validation][.log, .csv, .txt]: ', (fileName) => {
-        _rl.close();
+    var rl = _rl.createInterface({
+        input: process.stdin,
+        output: process.stdout
+    });
+
+    var fileName = 'stratux.log'
+
+    rl.question('File path to read with extension [no validation][.log, .txt, .csv]: ', (fileName) => {
+        rl.close();
 
         // grab extension
         var regex = /\.[0-9a-z]+$/i;
         var ext = fileName.match(regex)[0].toLowerCase();
 
-        // insert into dbo.FileInfo table and send the ID alone
-        var sql = 'INSERT INTO dbo.FileInfo (file_name, date_parsed) OUTPUT Inserted.ID VALUES (\'' + fileName + '\', GETDATE())';
+        // insert into FILE_INFO_TABLE table and send the ID alone
+        var sql = 'INSERT INTO ' + FILE_INFO_TABLE + ' (file_name, date_parsed) OUTPUT Inserted.ID VALUES (\'' + fileName + '\', GETDATE())';
         sendRequest(sql, (res) => {
+            console.log('Parsing \'' + fileName + '\', please wait...');
             var fileInfoID = res.recordset[0].ID;
             if (ext === '.csv')
                 parseCSV(fileName, fileInfoID);
@@ -58,7 +66,7 @@ function parseCSV(name, fileInfoID) {
             var keys = Object.keys(data);
 
             // build and send each query
-            sql = 'INSERT INTO dbo.DataDumpCSV (';
+            sql = 'INSERT INTO ' + CSV_TABLE + ' (';
             rows = '';
             columns = '';
             keys.forEach((key) => {
@@ -78,17 +86,34 @@ function parseCSV(name, fileInfoID) {
                 ++sentCount;
                 // reading will finish before sending, only complete when both are done
                 if (sentCount === readCount)
-                    halt('dbo.DataDumpCSV updated with ' + sentCount + ' new records');
+                    halt(CSV_TABLE + ' updated with ' + sentCount + ' new records.');
             });
         })
-        .on('end', (res) => {
-            // done reading the file but not sending requests
-            console.log('Read ' + readCount + ' rows.');
-        });
 }
 
 function parseLog(name, fileInfoID) {
+    var readCount = 0;
+    var sentCount = 0;
+    var rl = _rl.createInterface({
+        input: _fs.createReadStream(name)
+    });
 
+    rl.on('line', (line) => {
+        ++readCount;
+        var splitStr = line.split(' ');
+        var date = splitStr[0];
+        var time = splitStr[1];
+
+        line = splitStr.slice(2, splitStr.length).join(' ');
+
+        var sql = 'INSERT INTO ' + LOG_TABLE + ' (file_info_ID, date, time, data_string) VALUES (' + fileInfoID + ', \'' + date + '\', \'' + time + '\', \'' + line + '\')';
+        sendRequest(sql, (res) => {
+            ++sentCount;
+            // reading will finish before sending, only complete when both are done
+            if (readCount === sentCount)
+                halt(LOG_TABLE + ' updated with ' + sentCount + ' new records.')
+        });
+    });
 }
 
 function sendRequest(sql, cb) {
@@ -100,7 +125,7 @@ function sendRequest(sql, cb) {
     })
 }
 
-function halt(err) {
-    console.log(err);
+function halt(msg) {
+    console.log(msg + '\nExiting.');
     process.exit(0);
 }
