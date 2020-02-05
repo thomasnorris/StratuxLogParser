@@ -45,7 +45,8 @@ async function afterSqlConnect() {
         var fileName = files[index];
         var sql = 'INSERT INTO ' + FILE_INFO_TABLE + ' (file_name, date_parsed) OUTPUT Inserted.ID VALUES (\'' + fileName + '\', GETDATE())';
         sendRequest(sql, (res) => {
-            console.log('\nParsing \'' +  filePath + '\', please wait...');
+            console.log('\nParsing \'' +  fileName + '\', please wait...');
+
             var filePath = LOG_DIR + fileName;
             var fileInfoID = res.recordset[0].ID;
             if (fileName.match( /\.[0-9a-z]+$/g)[0].toLowerCase() === '.csv')
@@ -54,24 +55,25 @@ async function afterSqlConnect() {
                 parseLog(filePath, fileInfoID);
         });
     });
+
+    async function listMatchingFiles() {
+        return new Promise((res, rej) => {
+            _fs.readdir(LOG_DIR, (err, files) => {
+                console.log('Matching files in \'' + LOG_DIR + '\':');
+                var filtered = [];
+                var filterCount = 0;
+                files.filter((file) => {
+                    if (file.match(CSV_MATCH_REGEX) || file.match(LOG_MATCH_REGEX)) {
+                        console.log(filterCount++ + ': ' + file);
+                        filtered.push(file);
+                    }
+                });
+                res(filtered);
+            });
+        });
+    }
 }
 
-async function listMatchingFiles() {
-    return new Promise((res, rej) => {
-        _fs.readdir(LOG_DIR, (err, files) => {
-            console.log('Matching files in \'' + LOG_DIR + '\':');
-            var filtered = [];
-            var filterCount = 0;
-            files.filter((file) => {
-                if (file.match(CSV_MATCH_REGEX) || file.match(LOG_MATCH_REGEX)) {
-                    console.log(filterCount++ + ': ' + file);
-                    filtered.push(file);
-                }
-            });
-            res(filtered);
-        });
-    });
-}
 
 function parseCSV(filePath, fileInfoID) {
     var sql;
