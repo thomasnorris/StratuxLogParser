@@ -3,6 +3,8 @@ var _sql = require('mssql');
 var _csv = require('csv-parser');
 var _fs = require('fs');
 var _rl = require('readline');
+var _ssh = require('node-ssh');
+_ssh = new _ssh();
 
 const SQL_CFG = {
     user: 'sa',
@@ -12,23 +14,46 @@ const SQL_CFG = {
     port: 1433
 }
 
+const SSH_CFG = {
+    port: 22,
+    host: '192.168.10.1',
+    username: 'pi',
+    password: 'raspberry',
+    tryKeyboard: true
+}
+
+const REMOTE_LOG_DIR = '/var/log/';
+const LOCAL_LOG_DIR = process.env.USERPROFILE + '\\Desktop\\';
+
 const CSV_TABLE = 'dbo.SensorDataCSV';
 const LOG_TABLE = 'dbo.StratuxDataLog';
 const FILE_INFO_TABLE = 'dbo.ParsedFileInfo';
 const CSV_MATCH_REGEX = /sensors.+.csv/g;
 const LOG_MATCH_REGEX = /stratux.log/g;
-// const LOG_DIR = '/var/log/'
-const LOG_DIR = 'C:/Users/tnorris/Desktop/';
-
 
 (async function() {
     await dbConnect();
+    await sshConnect();
 
-    var file = await loadFile();
+    var matchingFiles = await getMatchingFiles();
+    var file = await chooseAndLoadFile(matchingFiles);
     var results = await parseFile(file);
 
     exit(results.table + ' updated with ' + results.count + ' new records.\nFile info ID: ' + file.infoID);
 })();
+
+async function sshConnect() {
+    return new Promise((resolve, reject) => {
+        _ssh.connect(SSH_CFG)
+            .then(() => {
+                console.log('SSH connection successful.\n');
+                resolve();
+            })
+            .catch((err) => {
+                exit(err);
+            });
+    });
+}
 
 async function dbConnect() {
     return new Promise((resolve, reject) => {
@@ -36,67 +61,80 @@ async function dbConnect() {
             if (err)
                 exit(err);
 
-            console.log('\n\nConnection successful.\n');
+            console.log('\nDatabase connection successful.');
             resolve();
         });
     })
 }
 
-async function loadFile() {
+async function chooseAndLoadFile(matchingFiles) {
     var rl = _rl.createInterface({
         input: process.stdin,
         output: process.stdout
     });
 
-    var files = await listMatchingFiles();
-
     return new Promise((resolve, reject) => {
-        rl.question('\nEnter file number to parse [0 - ' + (files.length - 1) + ']: ', (index) => {
+        rl.question('\nEnter file number to parse [0 - ' + (matchingFiles.length - 1) + ']: ', (index) => {
             rl.close();
 
-            if (!files[index])
+            if (!matchingFiles[index])
                 exit('Undefined file.');
 
-            var fileName = files[index];
+            var fileName = matchingFiles[index];
             var sql = 'INSERT INTO ' + FILE_INFO_TABLE + ' (file_name, date_parsed) OUTPUT Inserted.ID VALUES (\'' + fileName + '\', GETDATE())';
             sendRequest(sql, (res) => {
                 resolve({
                     name: fileName,
-                    fullPath: LOG_DIR + fileName,
+                    localPath: LOCAL_LOG_DIR + fileName,
+                    remotePath: REMOTE_LOG_DIR + fileName,
                     infoID: res.recordset[0].ID,
                     extension: fileName.match( /\.[0-9a-z]+$/g)[0].toLowerCase()
                 });
             });
         });
     });
+}
 
-    async function listMatchingFiles() {
-        return new Promise((resolve, reject) => {
-            _fs.readdir(LOG_DIR, (err, files) => {
-                console.log('Matching files in \'' + LOG_DIR + '\':');
+async function getMatchingFiles() {
+    return new Promise((resolve, reject) => {
+        _ssh.execCommand('ls ' + REMOTE_LOG_DIR)
+            .then((result) => {
+                var filesAndDirs = result.stdout.split('\n');
+                console.log('Matching files in \'' + REMOTE_LOG_DIR + '\':');
 
                 var filtered = [];
                 var filterCount = 0;
-                files.filter((file) => {
+                filesAndDirs.filter((file) => {
                     if (file.match(CSV_MATCH_REGEX) || file.match(LOG_MATCH_REGEX)) {
                         console.log(filterCount++ + ': ' + file);
                         filtered.push(file);
                     }
                 });
 
+                if (filtered.length === 0)
+                    exit('No matching files found.');
+
                 resolve(filtered);
+            })
+            .catch((err) => {
+                exit(err);
             });
-        });
-    }
+    });
 }
 
 async function parseFile(file) {
-    console.log('\nParsing \'' +  file.name + '\', please wait...');
+    console.log('\nProcessing \'' +  file.name + '\', please wait...');
+
     return new Promise((resolve, reject) => {
-        if (file.extension === '.csv')
-            parseCSV(resolve, reject);
-        else
-            parseLog(resolve, reject);
+        _ssh.getFile(file.localPath, REMOTE_LOG_DIR + '/' + file.name)
+            .then(() => {
+                console.log('Reading from local file: ' + file.localPath);
+
+                if (file.extension === '.csv')
+                    parseCSV(resolve, reject);
+                else
+                    parseLog(resolve, reject);
+            });
     });
 
     function parseCSV(resolve, reject) {
@@ -106,7 +144,7 @@ async function parseFile(file) {
         var readCount = 0;
         var sentCount = 0;
 
-        _fs.createReadStream(file.fullPath)
+        _fs.createReadStream(file.localPath)
             .pipe(_csv())
             .on('data', (data) => {
                 ++readCount;
@@ -144,7 +182,7 @@ async function parseFile(file) {
         var readCount = 0;
         var sentCount = 0;
         var rl = _rl.createInterface({
-            input: _fs.createReadStream(file.fullPath)
+            input: _fs.createReadStream(file.localPath)
         });
 
         rl.on('line', (line) => {
