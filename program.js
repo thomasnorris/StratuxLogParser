@@ -9,25 +9,26 @@ _ssh = new _ssh();
 const CFG_FILE = './config/config.json';
 var _config = readJson(CFG_FILE);
 
-if (!_config.log_directories.local)
-    _config.log_directories.local = process.env.USERPROFILE + '\\Desktop\\';
+if (!_config.directories.log.local)
+    _config.directories.log.local = process.env.USERPROFILE + '\\Desktop\\';
 
 (async function() {
     await sshConnect();
     await dbConnect();
 
     var matchingFiles = await getMatchingFiles();
-    var file = await chooseAndLoadFile(matchingFiles);
-    var results = await parseFile(file);
+    var file = await chooseMatchingFile(matchingFiles);
+    var results = await processMatchingFile(file);
 
-    exit(results.table + ' updated with ' + results.count + ' new records.\nFile info ID: ' + file.infoID);
+    notify('\"' + file.name + '\" updated \"' + results.table + '\" updated with ' + results.count + ' new records.')
+    exit('file_info_ID: ' + file.info_ID);
 })();
 
 async function sshConnect() {
     return new Promise((resolve, reject) => {
         _ssh.connect(_config.ssh.connection)
             .then(() => {
-                console.log('SSH connection successful.\n');
+                notify('SSH connection to \"' + _config.ssh.connection.host + '\" successful.');
                 resolve();
             })
             .catch((err) => {
@@ -42,32 +43,31 @@ async function dbConnect() {
             if (err)
                 exit(err);
 
-            console.log('\nDatabase connection successful.');
+            notify('Database connection to \"' + _config.sql.connection.server + '\" successful.');
             resolve();
         });
     })
 }
 
-async function chooseAndLoadFile(matchingFiles) {
-    var rl = createReadlineInterface(process.stdin, process.stdout);
+async function chooseMatchingFile(matchingFiles) {
+    notify('Matching files in \"' + _config.directories.log.remote + '\": ', true);
+    for (var i = 0; i < matchingFiles.length; ++i)
+        notify(i + ': ' + matchingFiles[i]);
 
     return new Promise((resolve, reject) => {
+        var rl = createReadlineInterface(process.stdin, process.stdout);
         rl.question('\nEnter file number to parse [0 - ' + (matchingFiles.length - 1) + ']: ', (index) => {
             rl.close();
 
+            var fileName = matchingFiles[index];
             if (!matchingFiles[index])
                 exit('Undefined file.');
 
-            var fileName = matchingFiles[index];
-            var sql = 'INSERT INTO ' + _config.sql.tables.file_info + ' (file_name, date_parsed) OUTPUT Inserted.ID VALUES (\'' + fileName + '\', GETDATE())';
-            sendRequest(sql, (res) => {
-                resolve({
-                    name: fileName,
-                    localPath: _config.log_directories.local + fileName,
-                    remotePath: _config.log_directories.remote + fileName,
-                    infoID: res.recordset[0].ID,
-                    extension: fileName.match(new RegExp(_config.regex.file_ext))[0].toLowerCase()
-                });
+            resolve({
+                name: fileName,
+                localPath: _config.directories.log.local + fileName,
+                remotePath: _config.directories.log.remote + fileName,
+                extension: fileName.match(new RegExp(_config.regex.file_ext))[0].toLowerCase()
             });
         });
     });
@@ -75,18 +75,13 @@ async function chooseAndLoadFile(matchingFiles) {
 
 async function getMatchingFiles() {
     return new Promise((resolve, reject) => {
-        _ssh.execCommand('ls ' + _config.log_directories.remote)
+        _ssh.execCommand('ls ' + _config.directories.log.remote)
             .then((result) => {
                 var filesAndDirs = result.stdout.split('\n');
-                console.log('Matching files in \"' + _config.log_directories.remote + '\":');
-
                 var filtered = [];
-                var filterCount = 0;
                 filesAndDirs.filter((file) => {
-                    if (file.match(new RegExp(_config.regex.log_match)) || file.match(new RegExp(_config.regex.csv_match))) {
-                        console.log(filterCount++ + ': ' + file);
+                    if (file.match(new RegExp(_config.regex.log_match)) || file.match(new RegExp(_config.regex.csv_match)))
                         filtered.push(file);
-                    }
                 });
 
                 if (filtered.length === 0)
@@ -100,19 +95,24 @@ async function getMatchingFiles() {
     });
 }
 
-async function parseFile(file) {
-    console.log('\nProcessing \"' +  file.name + '\", please wait...');
+async function processMatchingFile(file) {
+    notify('Processing \"' +  file.name + '\", please wait...', true);
 
     return new Promise((resolve, reject) => {
-        console.log('Copying remote file to local directory...');
-        _ssh.getFile(file.localPath, file.remotePath)
-            .then(() => {
-                console.log('Parsing and sending to database...');
-                if (file.extension === '.csv')
-                    parseCSV(resolve, reject);
-                else
-                    parseLog(resolve, reject);
-            });
+        var sql = 'INSERT INTO ' + _config.sql.tables.file_info + ' (file_name, date_parsed) OUTPUT Inserted.ID VALUES (\'' + file.name + '\', GETDATE())';
+        sendRequest(sql, (res) => {
+            file.info_ID = res.recordset[0].ID;
+
+            notify('Copying remote file to \"' + _config.directories.log.local + '\", please wait...');
+            _ssh.getFile(file.localPath, file.remotePath)
+                .then(() => {
+                    notify('Parsing and sending to database, please wait...');
+                    if (file.extension === '.csv')
+                        parseCSV(resolve, reject);
+                    else
+                        parseLog(resolve, reject);
+                });
+        });
     });
 
     function parseCSV(resolve, reject) {
@@ -126,7 +126,7 @@ async function parseFile(file) {
             .pipe(_csv())
             .on('data', (data) => {
                 ++readCount;
-                data.file_info_ID = file.infoID;
+                data.file_info_ID = file.info_ID;
                 sql = 'INSERT INTO ' + _config.sql.tables.csv + ' (';
                 rows = '';
                 columns = '';
@@ -169,7 +169,7 @@ async function parseFile(file) {
 
             line = splitStr.slice(2, splitStr.length).join(' ');
 
-            var sql = 'INSERT INTO ' + _config.sql.tables.log + ' (file_info_ID, date, time, message) VALUES (' + file.infoID + ', \'' + date + '\', \'' + time + '\', \'' + line + '\')';
+            var sql = 'INSERT INTO ' + _config.sql.tables.log + ' (file_info_ID, date, time, message) VALUES (' + file.info_ID + ', \'' + date + '\', \'' + time + '\', \'' + line + '\')';
             sendRequest(sql, (res) => {
                 ++sentCount;
                 if (readCount === sentCount)
@@ -207,6 +207,13 @@ function createReadlineInterface(input, output) {
 }
 
 function exit(msg) {
-    console.log('\n' + msg + '\nExiting.');
+    notify(msg, true);
+    notify('Exiting.');
     process.exit(0);
+}
+
+function notify(msg, newline) {
+    if (newline)
+        msg = '\n' + msg;
+    console.log(msg);
 }

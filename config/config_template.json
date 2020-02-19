@@ -22,9 +22,11 @@
             "tryKeyboard": true
         }
     },
-    "log_directories": {
-        "remote": "/var/log/",
-        "local": "C:/Windows/Temp/"
+    "directories": {
+        "log": {
+            "remote": "/home/pi/",
+            "local": "C:/Windows/Temp/"
+        }
     },
     "regex": {
         "csv_match": "sensors.+.csv",
