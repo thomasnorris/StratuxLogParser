@@ -24,7 +24,7 @@
     },
     "directories": {
         "log": {
-            "remote": "/home/pi/",
+            "remote": "/var/logs/",
             "local": "C:/Windows/Temp/"
         }
     },

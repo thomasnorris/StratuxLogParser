@@ -13,15 +13,21 @@ if (!_config.directories.log.local)
     _config.directories.log.local = process.env.USERPROFILE + '\\Desktop\\';
 
 (async function() {
+    // ssh, copy and prepare file for processing
     await sshConnect();
-    await dbConnect();
-
     var matchingFiles = await getMatchingFiles();
     var file = await chooseMatchingFile(matchingFiles);
+    await copyRemoteFileToLocal(file);
+
+    // process copied local file after establishing an internet connection
+    await promptDisconnectFromStratux();
+    await dbConnect();
     var results = await processMatchingFile(file);
 
-    notify('\"' + file.name + '\" updated \"' + results.table + '\" updated with ' + results.count + ' new records.')
-    exit('file_info_ID: ' + file.info_ID);
+    notify('\"' + file.name + '\" updated \"' + results.table + '\" updated with ' + results.count + ' new records.', true);
+    notify('file_info_ID: ' + file.info_ID);
+    notify('Process complete!', true);
+    exit();
 })();
 
 async function sshConnect() {
@@ -31,7 +37,7 @@ async function sshConnect() {
                 notify('SSH connection to \"' + _config.ssh.connection.host + '\" successful.');
                 resolve();
             })
-            .catch((err) => {
+            .catch(err => {
                 exit(err);
             });
     });
@@ -43,7 +49,7 @@ async function dbConnect() {
             if (err)
                 exit(err);
 
-            notify('Database connection to \"' + _config.sql.connection.server + '\" successful.');
+            notify('Database connection to \"' + _config.sql.connection.server + '\" successful.', true);
             resolve();
         });
     })
@@ -89,29 +95,44 @@ async function getMatchingFiles() {
 
                 resolve(filtered);
             })
-            .catch((err) => {
+            .catch(err => {
+                exit(err);
+            });
+    });
+}
+
+async function promptDisconnectFromStratux() {
+    return new Promise(resolve => {
+        var rl = createReadlineInterface(process.stdin, process.stdout);
+        rl.question('Disconnect from Stratux and reconnect to the internet before continuing [enter]: ', () => {
+            resolve();
+        });
+    });
+}
+
+async function copyRemoteFileToLocal(file) {
+    return new Promise(resolve => {
+        notify('Copying remote file to \"' + _config.directories.log.local + '\", please wait...');
+        _ssh.getFile(file.localPath, file.remotePath)
+            .then(() => {
+                resolve();
+            })
+            .catch(err => {
                 exit(err);
             });
     });
 }
 
 async function processMatchingFile(file) {
-    notify('Processing \"' +  file.name + '\", please wait...', true);
-
     return new Promise((resolve, reject) => {
         var sql = 'INSERT INTO ' + _config.sql.tables.file_info + ' (file_name, date_parsed) OUTPUT Inserted.ID VALUES (\'' + file.name + '\', GETDATE())';
         sendRequest(sql, (res) => {
             file.info_ID = res.recordset[0].ID;
-
-            notify('Copying remote file to \"' + _config.directories.log.local + '\", please wait...');
-            _ssh.getFile(file.localPath, file.remotePath)
-                .then(() => {
-                    notify('Parsing and sending to database, please wait...');
-                    if (file.extension === '.csv')
-                        parseCSV(resolve, reject);
-                    else
-                        parseLog(resolve, reject);
-                });
+            notify('Parsing and sending to database, please wait...');
+            if (file.extension === '.csv')
+                parseCSV(resolve, reject);
+            else
+                parseLog(resolve, reject);
         });
     });
 
@@ -133,7 +154,7 @@ async function processMatchingFile(file) {
 
                 var keys = Object.keys(data);
                 keys.forEach((key) => {
-                    rows += key
+                    rows += key;
                     columns += data[key];
 
                     // last key doesn't need a comma
@@ -207,7 +228,9 @@ function createReadlineInterface(input, output) {
 }
 
 function exit(msg) {
-    notify(msg, true);
+    if (msg)
+        notify(msg, true);
+
     notify('Exiting.');
     process.exit(0);
 }
