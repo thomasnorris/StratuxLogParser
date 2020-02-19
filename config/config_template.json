@@ -1,0 +1,16 @@
+{
+    "SQL": {
+        "user": "",
+        "password": "",
+        "server": "server\\instance",
+        "database": "",
+        "port": 1433
+    },
+    "SSH": {
+        "port": 22,
+        "host": "",
+        "username": "",
+        "password": "",
+        "tryKeyboard": true
+    }
+}

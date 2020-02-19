@@ -6,21 +6,8 @@ var _rl = require('readline');
 var _ssh = require('node-ssh');
 _ssh = new _ssh();
 
-const SQL_CFG = {
-    user: 'sa',
-    password: 'admin',
-    server: 'localhost\\sqlexpress',
-    database: 'StratuxLogs',
-    port: 1433
-}
-
-const SSH_CFG = {
-    port: 22,
-    host: '192.168.10.1',
-    username: 'pi',
-    password: 'raspberry',
-    tryKeyboard: true
-}
+const CFG_FILE = './config/config.json';
+var CFG = readJson(CFG_FILE)
 
 const REMOTE_LOG_DIR = '/var/log/';
 const LOCAL_LOG_DIR = process.env.USERPROFILE + '\\Desktop\\';
@@ -44,7 +31,7 @@ const LOG_MATCH_REGEX = /stratux.log/g;
 
 async function sshConnect() {
     return new Promise((resolve, reject) => {
-        _ssh.connect(SSH_CFG)
+        _ssh.connect(CFG.SSH)
             .then(() => {
                 console.log('SSH connection successful.\n');
                 resolve();
@@ -57,7 +44,7 @@ async function sshConnect() {
 
 async function dbConnect() {
     return new Promise((resolve, reject) => {
-        _sql.connect(SQL_CFG, (err) => {
+        _sql.connect(CFG.SQL, (err) => {
             if (err)
                 exit(err);
 
@@ -213,6 +200,10 @@ function sendRequest(sql, cb) {
             exit(err);
         cb(res);
     });
+}
+
+function readJson(filePath) {
+    return JSON.parse(_fs.readFileSync(filePath, 'utf8'));
 }
 
 function exit(msg) {
