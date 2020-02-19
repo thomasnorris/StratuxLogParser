@@ -7,20 +7,14 @@ var _ssh = require('node-ssh');
 _ssh = new _ssh();
 
 const CFG_FILE = './config/config.json';
-var CFG = readJson(CFG_FILE)
+var _config = readJson(CFG_FILE);
 
-const REMOTE_LOG_DIR = '/var/log/';
-const LOCAL_LOG_DIR = process.env.USERPROFILE + '\\Desktop\\';
-
-const CSV_TABLE = 'dbo.SensorDataCSV';
-const LOG_TABLE = 'dbo.StratuxDataLog';
-const FILE_INFO_TABLE = 'dbo.ParsedFileInfo';
-const CSV_MATCH_REGEX = /sensors.+.csv/g;
-const LOG_MATCH_REGEX = /stratux.log/g;
+if (!_config.log_directories.local)
+    _config.log_directories.local = process.env.USERPROFILE + '\\Desktop\\';
 
 (async function() {
-    await dbConnect();
     await sshConnect();
+    await dbConnect();
 
     var matchingFiles = await getMatchingFiles();
     var file = await chooseAndLoadFile(matchingFiles);
@@ -31,7 +25,7 @@ const LOG_MATCH_REGEX = /stratux.log/g;
 
 async function sshConnect() {
     return new Promise((resolve, reject) => {
-        _ssh.connect(CFG.SSH)
+        _ssh.connect(_config.ssh.connection)
             .then(() => {
                 console.log('SSH connection successful.\n');
                 resolve();
@@ -44,7 +38,7 @@ async function sshConnect() {
 
 async function dbConnect() {
     return new Promise((resolve, reject) => {
-        _sql.connect(CFG.SQL, (err) => {
+        _sql.connect(_config.sql.connection, (err) => {
             if (err)
                 exit(err);
 
@@ -55,10 +49,7 @@ async function dbConnect() {
 }
 
 async function chooseAndLoadFile(matchingFiles) {
-    var rl = _rl.createInterface({
-        input: process.stdin,
-        output: process.stdout
-    });
+    var rl = createReadlineInterface(process.stdin, process.stdout);
 
     return new Promise((resolve, reject) => {
         rl.question('\nEnter file number to parse [0 - ' + (matchingFiles.length - 1) + ']: ', (index) => {
@@ -68,14 +59,14 @@ async function chooseAndLoadFile(matchingFiles) {
                 exit('Undefined file.');
 
             var fileName = matchingFiles[index];
-            var sql = 'INSERT INTO ' + FILE_INFO_TABLE + ' (file_name, date_parsed) OUTPUT Inserted.ID VALUES (\'' + fileName + '\', GETDATE())';
+            var sql = 'INSERT INTO ' + _config.sql.tables.file_info + ' (file_name, date_parsed) OUTPUT Inserted.ID VALUES (\'' + fileName + '\', GETDATE())';
             sendRequest(sql, (res) => {
                 resolve({
                     name: fileName,
-                    localPath: LOCAL_LOG_DIR + fileName,
-                    remotePath: REMOTE_LOG_DIR + fileName,
+                    localPath: _config.log_directories.local + fileName,
+                    remotePath: _config.log_directories.remote + fileName,
                     infoID: res.recordset[0].ID,
-                    extension: fileName.match( /\.[0-9a-z]+$/g)[0].toLowerCase()
+                    extension: fileName.match(new RegExp(_config.regex.file_ext))[0].toLowerCase()
                 });
             });
         });
@@ -84,15 +75,15 @@ async function chooseAndLoadFile(matchingFiles) {
 
 async function getMatchingFiles() {
     return new Promise((resolve, reject) => {
-        _ssh.execCommand('ls ' + REMOTE_LOG_DIR)
+        _ssh.execCommand('ls ' + _config.log_directories.remote)
             .then((result) => {
                 var filesAndDirs = result.stdout.split('\n');
-                console.log('Matching files in \'' + REMOTE_LOG_DIR + '\':');
+                console.log('Matching files in \"' + _config.log_directories.remote + '\":');
 
                 var filtered = [];
                 var filterCount = 0;
                 filesAndDirs.filter((file) => {
-                    if (file.match(CSV_MATCH_REGEX) || file.match(LOG_MATCH_REGEX)) {
+                    if (file.match(new RegExp(_config.regex.log_match)) || file.match(new RegExp(_config.regex.csv_match))) {
                         console.log(filterCount++ + ': ' + file);
                         filtered.push(file);
                     }
@@ -110,13 +101,13 @@ async function getMatchingFiles() {
 }
 
 async function parseFile(file) {
-    console.log('\nProcessing \'' +  file.name + '\', please wait...');
+    console.log('\nProcessing \"' +  file.name + '\", please wait...');
 
     return new Promise((resolve, reject) => {
-        _ssh.getFile(file.localPath, REMOTE_LOG_DIR + '/' + file.name)
+        console.log('Copying remote file to local directory...');
+        _ssh.getFile(file.localPath, file.remotePath)
             .then(() => {
-                console.log('Reading from local file: ' + file.localPath);
-
+                console.log('Parsing and sending to database...');
                 if (file.extension === '.csv')
                     parseCSV(resolve, reject);
                 else
@@ -136,7 +127,7 @@ async function parseFile(file) {
             .on('data', (data) => {
                 ++readCount;
                 data.file_info_ID = file.infoID;
-                sql = 'INSERT INTO ' + CSV_TABLE + ' (';
+                sql = 'INSERT INTO ' + _config.sql.tables.csv + ' (';
                 rows = '';
                 columns = '';
 
@@ -158,7 +149,7 @@ async function parseFile(file) {
                     ++sentCount;
                     if (sentCount === readCount)
                         resolve({
-                            table: CSV_TABLE,
+                            table: _config.sql.tables.csv,
                             count: sentCount
                         });
                 });
@@ -168,9 +159,7 @@ async function parseFile(file) {
     function parseLog(resolve, reject) {
         var readCount = 0;
         var sentCount = 0;
-        var rl = _rl.createInterface({
-            input: _fs.createReadStream(file.localPath)
-        });
+        var rl = createReadlineInterface(_fs.createReadStream(file.localPath));
 
         rl.on('line', (line) => {
             ++readCount;
@@ -180,12 +169,12 @@ async function parseFile(file) {
 
             line = splitStr.slice(2, splitStr.length).join(' ');
 
-            var sql = 'INSERT INTO ' + LOG_TABLE + ' (file_info_ID, date, time, message) VALUES (' + file.infoID + ', \'' + date + '\', \'' + time + '\', \'' + line + '\')';
+            var sql = 'INSERT INTO ' + _config.sql.tables.log + ' (file_info_ID, date, time, message) VALUES (' + file.infoID + ', \'' + date + '\', \'' + time + '\', \'' + line + '\')';
             sendRequest(sql, (res) => {
                 ++sentCount;
                 if (readCount === sentCount)
                     resolve({
-                        table: LOG_TABLE,
+                        table: _config.sql.tables.log,
                         count: sentCount
                     });
             });
@@ -204,6 +193,17 @@ function sendRequest(sql, cb) {
 
 function readJson(filePath) {
     return JSON.parse(_fs.readFileSync(filePath, 'utf8'));
+}
+
+function createReadlineInterface(input, output) {
+    var ops = {};
+    if (input)
+        ops.input = input;
+
+    if (output)
+        ops.output = output;
+
+    return _rl.createInterface(ops);
 }
 
 function exit(msg) {

@@ -1,16 +1,34 @@
 {
-    "SQL": {
-        "user": "",
-        "password": "",
-        "server": "server\\instance",
-        "database": "",
-        "port": 1433
+    "sql": {
+        "connection": {
+            "user": "sa",
+            "password": "admin",
+            "server": "localhost\\sqlexpress",
+            "database": "StratuxLogs",
+            "port": 1433
+        },
+        "tables": {
+            "csv": "dbo.SensorDataCSV",
+            "log": "dbo.StratuxDataLog",
+            "file_info": "dbo.ParsedFileInfo"
+        }
     },
-    "SSH": {
-        "port": 22,
-        "host": "",
-        "username": "",
-        "password": "",
-        "tryKeyboard": true
+    "ssh": {
+        "connection": {
+            "port": 22,
+            "host": "192.168.10.1",
+            "username": "pi",
+            "password": "raspberry",
+            "tryKeyboard": true
+        }
+    },
+    "log_directories": {
+        "remote": "/var/log/",
+        "local": "C:/Windows/Temp/"
+    },
+    "regex": {
+        "csv_match": "sensors.+.csv",
+        "log_match": "stratux.log",
+        "file_ext": "\\.[0-9a-z]+$"
     }
 }
