@@ -171,7 +171,7 @@ async function processMatchingFile(file) {
                             ++sentCount;
                             if (readCount === sentCount)
                                 resolve({
-                                    table: _config.sql.tables.log,
+                                    table: _config.sql.tables.csv,
                                     count: sentCount
                                 });
                         });
@@ -194,14 +194,18 @@ async function processMatchingFile(file) {
             line = splitStr.slice(2, splitStr.length).join(' ');
 
             var sql = 'INSERT INTO ' + _config.sql.tables.log + ' (file_info_ID, date, time, message) VALUES (' + file.info_ID + ', \'' + date + '\', \'' + time + '\', \'' + line + '\')';
-            sendRequest(sql, (res) => {
-                ++sentCount;
-                if (readCount === sentCount)
-                    resolve({
-                        table: _config.sql.tables.log,
-                        count: sentCount
+            ((i) => {
+                setTimeout(() => {
+                    sendRequest(sql, (res) => {
+                        ++sentCount;
+                        if (readCount === sentCount)
+                            resolve({
+                                table: _config.sql.tables.log,
+                                count: sentCount
+                            });
                     });
-            });
+                }, i * _config.sql.request_delay_ms);
+            })(readCount);
         });
     }
 }
