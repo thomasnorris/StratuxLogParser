@@ -165,15 +165,18 @@ async function processMatchingFile(file) {
                 });
 
                 sql += rows + ') VALUES (' + columns + ');';
-
-                sendRequest(sql, (res) => {
-                    ++sentCount;
-                    if (sentCount === readCount)
-                        resolve({
-                            table: _config.sql.tables.csv,
-                            count: sentCount
+                ((i) => {
+                    setTimeout(() => {
+                        sendRequest(sql, (res) => {
+                            ++sentCount;
+                            if (readCount === sentCount)
+                                resolve({
+                                    table: _config.sql.tables.log,
+                                    count: sentCount
+                                });
                         });
-                });
+                    }, i * 2);
+                })(readCount);
             });
     }
 
