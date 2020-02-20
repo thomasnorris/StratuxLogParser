@@ -17,10 +17,10 @@ if (!_config.directories.log.local)
     await sshConnect();
     var matchingFiles = await getMatchingFiles();
     var file = await chooseMatchingFile(matchingFiles);
-    await copyRemoteFileToLocal(file);
+    //await copyRemoteFileToLocal(file);
 
     // process copied local file after establishing an internet connection
-    await promptDisconnectFromStratux();
+    //await promptDisconnectFromStratux();
     await dbConnect();
     var results = await processMatchingFile(file);
 
@@ -175,7 +175,7 @@ async function processMatchingFile(file) {
                                     count: sentCount
                                 });
                         });
-                    }, i * 2);
+                    }, i * _config.sql.request_delay_ms);
                 })(readCount);
             });
     }

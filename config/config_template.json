@@ -11,7 +11,8 @@
             "csv": "dbo.SensorDataCSV",
             "log": "dbo.StratuxDataLog",
             "file_info": "dbo.ParsedFileInfo"
-        }
+        },
+        "request_delay_ms": 2
     },
     "ssh": {
         "connection": {
